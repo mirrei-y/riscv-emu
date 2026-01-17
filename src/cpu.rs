@@ -122,6 +122,23 @@ impl Cpu {
         }
     }
 
+    /// レジスタを読み込みます。
+    pub fn read_register(&self, index: RegIdx) -> u64 {
+        if index == 0 {
+            return 0;
+        }
+
+        self.registers[index as usize]
+    }
+    /// レジスタに書き込みます。
+    pub fn write_register(&mut self, index: RegIdx, value: u64) -> () {
+        if index == 0 {
+            return;
+        }
+
+        self.registers[index as usize] = value;
+    }
+
     /// 命令をフェッチします。
     pub fn fetch(&mut self) -> Result<u64, Exception> {
         // TODO: 圧縮命令を考慮していない (フェーズ2にて実装)
@@ -326,7 +343,218 @@ impl Cpu {
     }
 
     /// 命令を実行します。
-    pub fn execute() {
+    pub fn execute(&mut self, instruction: Instruction) -> Result<(), Exception> {
+        Ok(match instruction {
+            // NOTE: RV32I R-Type
+            Instruction::ADD { rd, rs1, rs2 } => {
+                self.write_register(rd, self.read_register(rs1).wrapping_add(self.read_register(rs2)));
+            }
+            Instruction::SUB { rd, rs1, rs2 } => {
+                self.write_register(rd, self.read_register(rs1).wrapping_sub(self.read_register(rs2)));
+            }
+            Instruction::SLL { rd, rs1, rs2 } => {
+                let shamt = self.read_register(rs2) & 0x3f; // 下位6bitを使用
+                self.write_register(rd, self.read_register(rs1) << shamt);
+            }
+            Instruction::SLT { rd, rs1, rs2 } => {
+                let val1 = self.read_register(rs1) as i64;
+                let val2 = self.read_register(rs2) as i64;
+                self.write_register(rd, if val1 < val2 { 1 } else { 0 });
+            }
+            Instruction::SLTU { rd, rs1, rs2 } => {
+                let val1 = self.read_register(rs1);
+                let val2 = self.read_register(rs2);
+                self.write_register(rd, if val1 < val2 { 1 } else { 0 });
+            }
+            Instruction::XOR { rd, rs1, rs2 } => {
+                self.write_register(rd, self.read_register(rs1) ^ self.read_register(rs2));
+            }
+            Instruction::SRL { rd, rs1, rs2 } => {
+                let shamt = self.read_register(rs2) & 0x3f;
+                self.write_register(rd, self.read_register(rs1) >> shamt);
+            }
+            Instruction::SRA { rd, rs1, rs2 } => {
+                let shamt = self.read_register(rs2) & 0x3f;
+                self.write_register(rd, ((self.read_register(rs1) as i64) >> shamt) as u64);
+            }
+            Instruction::OR { rd, rs1, rs2 } => {
+                self.write_register(rd, self.read_register(rs1) | self.read_register(rs2));
+            }
+            Instruction::AND { rd, rs1, rs2 } => {
+                self.write_register(rd, self.read_register(rs1) & self.read_register(rs2));
+            }
+            // NOTE: RV32M
+            Instruction::MUL { rd, rs1, rs2 } => {
+                self.write_register(rd, self.read_register(rs1).wrapping_mul(self.read_register(rs2)));
+            }
+            Instruction::MULH { rd, rs1, rs2 } => {},
+            Instruction::MULHSU { rd, rs1, rs2 } => {},
+            Instruction::MULHU { rd, rs1, rs2 } => {},
+            Instruction::DIV { rd, rs1, rs2 } => {
+                let dividend = self.read_register(rs1) as i64;
+                let divisor = self.read_register(rs2) as i64;
+                if divisor == 0 {
+                    self.write_register(rd, u64::MAX); // NOTE: ゼロ除算は -1 を返す
+                } else if dividend == i64::MIN && divisor == -1 {
+                    self.write_register(rd, dividend as u64); // NOTE: オーバーフロー時は dividend を返す
+                } else {
+                    self.write_register(rd, dividend.wrapping_div(divisor) as u64);
+                }
+            }
+            Instruction::DIVU { rd, rs1, rs2 } => {},
+            Instruction::REM { rd, rs1, rs2 } => {},
+            Instruction::REMU { rd, rs1, rs2 } => {},
+            // NOTE: RV64I R-Type
+            Instruction::ADDW { rd, rs1, rs2 } => {
+                let val1 = self.read_register(rs1) as i32;
+                let val2 = self.read_register(rs2) as i32;
+                let result = val1.wrapping_add(val2);
+                self.write_register(rd, result as i64 as u64); // NOTE: i32 -> i64 で符号拡張
+            }
+            Instruction::SUBW { rd, rs1, rs2 } => {
+                let val1 = self.read_register(rs1) as i32;
+                let val2 = self.read_register(rs2) as i32;
+                let result = val1.wrapping_sub(val2);
+                self.write_register(rd, result as i64 as u64);
+            }
+            Instruction::SLLW { rd, rs1, rs2 } => {
+                let val1 = self.read_register(rs1) as u32;
+                let shamt = self.read_register(rs2) as u32 & 0b11111; // NOTE: 32bitシフトは下位5bit
+                let result = (val1 << shamt) as i32;
+                self.write_register(rd, result as i64 as u64); // NOTE: i32 -> i64 で符号拡張
+            }
+            Instruction::SRLW { rd, rs1, rs2 } => {
+                let val1 = self.read_register(rs1) as u32;
+                let shamt = self.read_register(rs2) as u32 & 0b11111;
+                let result = (val1 >> shamt) as i32;
+                self.write_register(rd, result as i64 as u64);
+            }
+            Instruction::SRAW { rd, rs1, rs2 } => {
+                let val1 = self.read_register(rs1) as i32;
+                let shamt = self.read_register(rs2) as u32 & 0b11111;
+                let result = val1 >> shamt; // NOTE: i32 なので算術シフト
+                self.write_register(rd, result as i64 as u64);
+            }
+            // NOTE: RV64M
+            Instruction::MULW { rd, rs1, rs2 } => {},
+            Instruction::DIVW { rd, rs1, rs2 } => {},
+            Instruction::DIVUW { rd, rs1, rs2 } => {},
+            Instruction::REMW { rd, rs1, rs2 } => {},
+            Instruction::REMUW { rd, rs1, rs2 } => {},
 
+            // NOTE: RV32I I-Type
+            Instruction::ADDI { rd, rs1, imm } => self.write_register(rd, self.read_register(rs1).wrapping_add(imm as u64)),
+            Instruction::SLTI { rd, rs1, imm } => {},
+            Instruction::SLTIU { rd, rs1, imm } => {},
+            Instruction::XORI { rd, rs1, imm } => {},
+            Instruction::ORI { rd, rs1, imm } => self.write_register(rd, self.read_register(rs1) | (imm as u64)),
+            Instruction::ANDI { rd, rs1, imm } => self.write_register(rd, self.read_register(rs1) & (imm as u64)),
+            Instruction::SLLI { rd, rs1, shamt } => {},
+            Instruction::SRLI { rd, rs1, shamt } => {},
+            Instruction::SRAI { rd, rs1, shamt } => {},
+            // NOTE: RV64I I-Type
+            Instruction::ADDIW { rd, rs1, imm } => self.write_register(rd, ((self.read_register(rs1) as i32).wrapping_add(imm as i32)) as u64),
+            Instruction::SLLIW { rd, rs1, shamt } => {},
+            Instruction::SRLIW { rd, rs1, shamt } => {},
+            Instruction::SRAIW { rd, rs1, shamt } => {},
+            // NOTE: RV32I I-Type (メモリ操作)
+            Instruction::LB { rd, rs1, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                let val = self.bus.read(addr, 1)? as i8; // NOTE: 8bit 読み込み -> i8
+                self.write_register(rd, val as i64 as u64);
+            }
+            Instruction::LH { rd, rs1, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                let val = self.bus.read(addr, 2)? as i16;
+                self.write_register(rd, val as i64 as u64);
+            }
+            Instruction::LW { rd, rs1, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                let val = self.bus.read(addr, 4)? as i32;
+                self.write_register(rd, val as i64 as u64);
+            }
+            Instruction::LBU { rd, rs1, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                let val = self.bus.read(addr, 1)?; // NOTE: u64 で返ってくる (上位は0埋めされている前提)
+                self.write_register(rd, val);
+            }
+            Instruction::LHU { rd, rs1, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                let val = self.bus.read(addr, 2)?;
+                self.write_register(rd, val);
+            }
+            // NOTE: RV64I I-Type (メモリ操作)
+            Instruction::LD { rd, rs1, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                let val = self.bus.read(addr, 8)?;
+                self.write_register(rd, val);
+            }
+            Instruction::LWU { rd, rs1, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                let val = self.bus.read(addr, 4)?;
+                self.write_register(rd, val);
+            }
+
+            // NOTE: RV32I S-Type
+            Instruction::SB { rs1, rs2, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                self.bus.write(addr, self.read_register(rs2), 1)?;
+            }
+            Instruction::SH { rs1, rs2, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                self.bus.write(addr, self.read_register(rs2), 2)?;
+            }
+            Instruction::SW { rs1, rs2, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                self.bus.write(addr, self.read_register(rs2), 4)?;
+            }
+            // NOTE: RV64I S-Type
+            Instruction::SD { rs1, rs2, offset } => {
+                let addr = self.read_register(rs1).wrapping_add(offset as u64);
+                self.bus.write(addr, self.read_register(rs2), 8)?;
+            }
+
+            // NOTE: RV32I B-Type
+            Instruction::BEQ { rs1, rs2, offset } => {
+                if self.read_register(rs1) == self.read_register(rs2) {
+                    self.pc = (self.pc - 4).wrapping_add(offset as u64);
+                }
+            }
+            Instruction::BNE { rs1, rs2, offset } => {
+                if self.read_register(rs1) != self.read_register(rs2) {
+                    self.pc = (self.pc - 4).wrapping_add(offset as u64);
+                }
+            }
+            Instruction::BLT { rs1, rs2, offset } => {
+                if (self.read_register(rs1) as i64) < (self.read_register(rs2) as i64) {
+                    self.pc = (self.pc - 4).wrapping_add(offset as u64);
+                }
+            }
+            Instruction::BGE { rs1, rs2, offset } => {},
+            Instruction::BLTU { rs1, rs2, offset } => {},
+            Instruction::BGEU { rs1, rs2, offset } => {},
+
+            // NOTE: RV32I U-Type
+            Instruction::LUI { rd, imm } => {},
+            Instruction::AUIPC { rd, imm } => {},
+
+            // NOTE: RV32I J-Type
+            Instruction::JAL { rd, offset } => {
+                self.write_register(rd, self.pc); // NOTE: 次の命令のアドレス (戻り先) を保存
+                self.pc = (self.pc - 4).wrapping_add(offset as u64);
+            }
+            Instruction::JALR { rd, rs1, offset } => {
+                let t = self.pc; // NOTE: 戻り先 (fetch済みなので pc は pc+4 になっている)
+                // NOTE: JALR は rs1 + offset の最下位ビットを0にする仕様がある
+                let target = (self.read_register(rs1).wrapping_add(offset as u64)) & !1;
+                self.pc = target;
+                self.write_register(rd, t);
+            }
+
+            // NOTE: RV32I System
+            Instruction::EBREAK => {},
+
+            _ => {},
+        })
     }
 }
