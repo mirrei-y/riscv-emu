@@ -4,7 +4,7 @@ use elf::endian::LittleEndian;
 use elf::ElfBytes;
 use elf::abi::PT_LOAD;
 
-use riscv_emu::{Bus, Cpu, Instruction, Memory, cpu::Exception};
+use riscv_emu::{Bus, Cpu, Instruction, Memory, Exception};
 
 fn run_vm(path: &Path) -> Result<(), Exception> {
     let file_data = fs::read(path).expect("Could not read file");

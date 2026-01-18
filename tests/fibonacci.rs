@@ -1,4 +1,4 @@
-use riscv_emu::{cpu::{Cpu, Instruction}, bus::Bus, memory::Memory};
+use riscv_emu::{Cpu, Instruction, Bus, Memory};
 
 #[test]
 fn test_fibonacci() -> Result<(), Box<dyn std::error::Error>> {

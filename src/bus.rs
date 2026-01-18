@@ -1,4 +1,4 @@
-use crate::{cpu::Exception, memory::Memory};
+use crate::{Exception, memory::Memory};
 
 /// バス
 pub struct Bus {
