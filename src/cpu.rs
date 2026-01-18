@@ -6,7 +6,8 @@ pub type RegIdx = u8;
 pub type Imm = i64;
 /// シフト量 (Shift Amount)
 pub type Shamt = u32;
-
+/// レジスタ長
+pub const XLEN: u8 = 64;
 // TODO: 将来、Trap に変換される
 /// エラー型
 #[derive(Debug)]
@@ -302,8 +303,8 @@ impl Cpu {
             },
 
             // NOTE: RV32I U-Type
-            0b01101_11 => Ok(Instruction::LUI { rd, imm: (instruction & 0xfffff000) as Imm }),
-            0b00101_11 => Ok(Instruction::AUIPC { rd, imm: (instruction & 0xfffff000) as Imm }),
+            0b01101_11 => Ok(Instruction::LUI { rd, imm: (instruction as i32 & 0xfffff000u32 as i32) as Imm }),
+            0b00101_11 => Ok(Instruction::AUIPC { rd, imm: (instruction as i32 & 0xfffff000u32 as i32) as Imm }),
 
             // NOTE: RV32I J-Type
             0b11011_11 => {
@@ -387,9 +388,15 @@ impl Cpu {
             Instruction::MUL { rd, rs1, rs2 } => {
                 self.write_register(rd, self.read_register(rs1).wrapping_mul(self.read_register(rs2)));
             }
-            Instruction::MULH { rd, rs1, rs2 } => {},
-            Instruction::MULHSU { rd, rs1, rs2 } => {},
-            Instruction::MULHU { rd, rs1, rs2 } => {},
+            Instruction::MULH { rd, rs1, rs2 } => {
+                self.write_register(rd, ((self.read_register(rs1) as i64 as i128).wrapping_mul(self.read_register(rs2) as i64 as i128) >> XLEN) as u64);
+            }
+            Instruction::MULHSU { rd, rs1, rs2 } => {
+                self.write_register(rd, ((self.read_register(rs1) as i64 as i128).wrapping_mul(self.read_register(rs2) as u128 as i128) >> XLEN) as u64);
+            }
+            Instruction::MULHU { rd, rs1, rs2 } => {
+                self.write_register(rd, ((self.read_register(rs1) as u64 as u128).wrapping_mul(self.read_register(rs2) as u64 as u128) >> XLEN) as u64);
+            }
             Instruction::DIV { rd, rs1, rs2 } => {
                 let dividend = self.read_register(rs1) as i64;
                 let divisor = self.read_register(rs2) as i64;
@@ -401,9 +408,35 @@ impl Cpu {
                     self.write_register(rd, dividend.wrapping_div(divisor) as u64);
                 }
             }
-            Instruction::DIVU { rd, rs1, rs2 } => {},
-            Instruction::REM { rd, rs1, rs2 } => {},
-            Instruction::REMU { rd, rs1, rs2 } => {},
+            Instruction::DIVU { rd, rs1, rs2 } => {
+                let dividend = self.read_register(rs1) as u64;
+                let divisor = self.read_register(rs2) as u64;
+                if divisor == 0 {
+                    self.write_register(rd, u64::MAX); // NOTE: ゼロ除算は -1 を返す
+                } else {
+                    self.write_register(rd, dividend.wrapping_div(divisor) as u64);
+                }
+            }
+            Instruction::REM { rd, rs1, rs2 } => {
+                let dividend = self.read_register(rs1) as i64;
+                let divisor = self.read_register(rs2) as i64;
+                if divisor == 0 {
+                    self.write_register(rd, dividend as u64); // NOTE: ゼロ除算は dividend を返す
+                } else if dividend == i64::MIN && divisor == -1 {
+                    self.write_register(rd, 0); // NOTE: オーバーフロー時は 0 を返す
+                } else {
+                    self.write_register(rd, dividend.wrapping_rem(divisor) as u64);
+                }
+            }
+            Instruction::REMU { rd, rs1, rs2 } => {
+                let dividend = self.read_register(rs1) as u64;
+                let divisor = self.read_register(rs2) as u64;
+                if divisor == 0 {
+                    self.write_register(rd, dividend); // NOTE: ゼロ除算は dividend を返す
+                } else {
+                    self.write_register(rd, dividend.wrapping_rem(divisor) as u64);
+                }
+            }
             // NOTE: RV64I R-Type
             Instruction::ADDW { rd, rs1, rs2 } => {
                 let val1 = self.read_register(rs1) as i32;
@@ -436,27 +469,101 @@ impl Cpu {
                 self.write_register(rd, result as i64 as u64);
             }
             // NOTE: RV64M
-            Instruction::MULW { rd, rs1, rs2 } => {},
-            Instruction::DIVW { rd, rs1, rs2 } => {},
-            Instruction::DIVUW { rd, rs1, rs2 } => {},
-            Instruction::REMW { rd, rs1, rs2 } => {},
-            Instruction::REMUW { rd, rs1, rs2 } => {},
+            Instruction::MULW { rd, rs1, rs2 } => {
+                let val1 = self.read_register(rs1) as i32;
+                let val2 = self.read_register(rs2) as i32;
+                let result = val1.wrapping_mul(val2);
+                self.write_register(rd, result as i64 as u64);
+            }
+            Instruction::DIVW { rd, rs1, rs2 } => {
+                let dividend = self.read_register(rs1) as i32;
+                let divisor = self.read_register(rs2) as i32;
+                if divisor == 0 {
+                    self.write_register(rd, u32::MAX as i64 as u64);
+                } else if dividend == i32::MIN && divisor == -1 {
+                    self.write_register(rd, dividend as i64 as u64);
+                } else {
+                    self.write_register(rd, dividend.wrapping_div(divisor) as i64 as u64);
+                }
+            }
+            Instruction::DIVUW { rd, rs1, rs2 } => {
+                let dividend = self.read_register(rs1) as u32;
+                let divisor = self.read_register(rs2) as u32;
+                if divisor == 0 {
+                    self.write_register(rd, u32::MAX as u64);
+                } else {
+                    self.write_register(rd, dividend.wrapping_div(divisor) as u64);
+                }
+            }
+            Instruction::REMW { rd, rs1, rs2 } => {
+                let dividend = self.read_register(rs1) as i32;
+                let divisor = self.read_register(rs2) as i32;
+                if divisor == 0 {
+                    self.write_register(rd, dividend as i64 as u64);
+                } else if dividend == i32::MIN && divisor == -1 {
+                    self.write_register(rd, 0);
+                } else {
+                    self.write_register(rd, dividend.wrapping_rem(divisor) as i64 as u64);
+                }
+            }
+            Instruction::REMUW { rd, rs1, rs2 } => {
+                let dividend = self.read_register(rs1) as u32;
+                let divisor = self.read_register(rs2) as u32;
+                if divisor == 0 {
+                    self.write_register(rd, dividend as u64);
+                } else {
+                    self.write_register(rd, dividend.wrapping_rem(divisor) as u64);
+                }
+            }
 
             // NOTE: RV32I I-Type
-            Instruction::ADDI { rd, rs1, imm } => self.write_register(rd, self.read_register(rs1).wrapping_add(imm as u64)),
-            Instruction::SLTI { rd, rs1, imm } => {},
-            Instruction::SLTIU { rd, rs1, imm } => {},
-            Instruction::XORI { rd, rs1, imm } => {},
-            Instruction::ORI { rd, rs1, imm } => self.write_register(rd, self.read_register(rs1) | (imm as u64)),
-            Instruction::ANDI { rd, rs1, imm } => self.write_register(rd, self.read_register(rs1) & (imm as u64)),
-            Instruction::SLLI { rd, rs1, shamt } => {},
-            Instruction::SRLI { rd, rs1, shamt } => {},
-            Instruction::SRAI { rd, rs1, shamt } => {},
+            Instruction::ADDI { rd, rs1, imm } => {
+                self.write_register(rd, self.read_register(rs1).wrapping_add(imm as u64));
+            }
+            Instruction::SLTI { rd, rs1, imm } => {
+                let val1 = self.read_register(rs1) as i64;
+                let val2 = imm as i64;
+                self.write_register(rd, if val1 < val2 { 1 } else { 0 });
+            }
+            Instruction::SLTIU { rd, rs1, imm } => {
+                let val1 = self.read_register(rs1);
+                let val2 = imm as u64;
+                self.write_register(rd, if val1 < val2 { 1 } else { 0 });
+            }
+            Instruction::XORI { rd, rs1, imm } => {
+                self.write_register(rd, self.read_register(rs1) ^ (imm as u64));
+            }
+            Instruction::ORI { rd, rs1, imm } => {
+                self.write_register(rd, self.read_register(rs1) | (imm as u64));
+            }
+            Instruction::ANDI { rd, rs1, imm } => {
+                self.write_register(rd, self.read_register(rs1) & (imm as u64));
+            }
+            Instruction::SLLI { rd, rs1, shamt } => {
+                self.write_register(rd, self.read_register(rs1) << (shamt as u64));
+            }
+            Instruction::SRLI { rd, rs1, shamt } => {
+                self.write_register(rd, self.read_register(rs1) >> (shamt as u64));
+            }
+            Instruction::SRAI { rd, rs1, shamt } => {
+                self.write_register(rd, ((self.read_register(rs1) as i64) >> (shamt as u64)) as u64)
+            }
             // NOTE: RV64I I-Type
-            Instruction::ADDIW { rd, rs1, imm } => self.write_register(rd, ((self.read_register(rs1) as i32).wrapping_add(imm as i32)) as u64),
-            Instruction::SLLIW { rd, rs1, shamt } => {},
-            Instruction::SRLIW { rd, rs1, shamt } => {},
-            Instruction::SRAIW { rd, rs1, shamt } => {},
+            Instruction::ADDIW { rd, rs1, imm } => {
+                self.write_register(rd, ((self.read_register(rs1) as i32).wrapping_add(imm as i32)) as u64)
+            }
+            Instruction::SLLIW { rd, rs1, shamt } => {
+                let val = (self.read_register(rs1) as i32) << (shamt as u32);
+                self.write_register(rd, val as i64 as u64);
+            }
+            Instruction::SRLIW { rd, rs1, shamt } => {
+                let val = (self.read_register(rs1) as u32) >> (shamt as u32);
+                self.write_register(rd, val as i64 as u64);
+            }
+            Instruction::SRAIW { rd, rs1, shamt } => {
+                let val = (self.read_register(rs1) as i32) >> (shamt as u32);
+                self.write_register(rd, val as i64 as u64);
+            }
             // NOTE: RV32I I-Type (メモリ操作)
             Instruction::LB { rd, rs1, offset } => {
                 let addr = self.read_register(rs1).wrapping_add(offset as u64);
@@ -530,13 +637,29 @@ impl Cpu {
                     self.pc = (self.pc - 4).wrapping_add(offset as u64);
                 }
             }
-            Instruction::BGE { rs1, rs2, offset } => {},
-            Instruction::BLTU { rs1, rs2, offset } => {},
-            Instruction::BGEU { rs1, rs2, offset } => {},
+            Instruction::BGE { rs1, rs2, offset } => {
+                if (self.read_register(rs1) as i64) >= (self.read_register(rs2) as i64) {
+                    self.pc = (self.pc - 4).wrapping_add(offset as u64);
+                }
+            }
+            Instruction::BLTU { rs1, rs2, offset } => {
+                if self.read_register(rs1) < self.read_register(rs2) {
+                    self.pc = (self.pc - 4).wrapping_add(offset as u64);
+                }
+            }
+            Instruction::BGEU { rs1, rs2, offset } => {
+                if self.read_register(rs1) >= self.read_register(rs2) {
+                    self.pc = (self.pc - 4).wrapping_add(offset as u64);
+                }
+            }
 
             // NOTE: RV32I U-Type
-            Instruction::LUI { rd, imm } => {},
-            Instruction::AUIPC { rd, imm } => {},
+            Instruction::LUI { rd, imm } => {
+                self.write_register(rd, imm as u64);
+            }
+            Instruction::AUIPC { rd, imm } => {
+                self.write_register(rd, (self.pc - 4).wrapping_add(imm as u64));
+            }
 
             // NOTE: RV32I J-Type
             Instruction::JAL { rd, offset } => {
@@ -552,9 +675,7 @@ impl Cpu {
             }
 
             // NOTE: RV32I System
-            Instruction::EBREAK => {},
-
-            _ => {},
+            Instruction::EBREAK => {}
         })
     }
 }
