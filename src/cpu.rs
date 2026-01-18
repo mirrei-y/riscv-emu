@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::bus::Bus;
 
 /// レジスタ番号 (Register Index)
@@ -105,6 +107,16 @@ pub enum Instruction {
     EBREAK,
 }
 
+pub struct InstructionContext {
+    pub instruction: Instruction,
+    pub next_pc: u64,
+}
+impl Debug for InstructionContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?} (Next PC: 0x{:08x})", self.instruction, self.next_pc)
+    }
+}
+
 /// CPU
 pub struct Cpu {
     /// レジスタ
@@ -142,14 +154,12 @@ impl Cpu {
 
     /// 命令をフェッチします。
     pub fn fetch(&mut self) -> Result<u64, Exception> {
-        // TODO: 圧縮命令を考慮していない (フェーズ2にて実装)
         let instruction = self.bus.read(self.pc, 4)?;
-        self.pc += 4;
         Ok(instruction)
     }
 
     /// 命令をデコードします。
-    pub fn decode(&self, instruction: u64) -> Result<Instruction, Exception> {
+    pub fn decode(&self, instruction: u64) -> Result<InstructionContext, Exception> {
         let opcode = instruction & 0b111_1111;
         let rd = ((instruction >> 7) & 0b1_1111) as RegIdx; // 宛先レジスタ
         let funct3 = (instruction >> 12) & 0b111; // 細分類その1
@@ -157,7 +167,7 @@ impl Cpu {
         let rs2 = ((instruction >> 20) & 0b1_1111) as RegIdx; // ソースレジスタ2
         let funct7 = (instruction >> 25) & 0b111_1111; // 細分類その2
 
-        match opcode {
+        let instruction = match opcode {
             0b01100_11 => match (funct7, funct3) {
                 // NOTE: RV32I R-Type
                 (0b00000_00, 0b000) => Ok(Instruction::ADD { rd, rs1, rs2 }),
@@ -340,7 +350,12 @@ impl Cpu {
             },
 
             _ => Err(Exception::UnknownInstruction(instruction)),
-        }
+        }?;
+
+        Ok(InstructionContext {
+            instruction,
+            next_pc: self.pc + 4,
+        })
     }
 
     /// R-Type (Register-Register) 演算用ヘルパー: rs1 と rs2 を読み出し、op を適用して rd に書き込みます。
@@ -397,8 +412,7 @@ impl Cpu {
         let val1 = self.read_register(rs1);
         let val2 = self.read_register(rs2);
         if condition(val1, val2) {
-            // NOTE: pc は fetch 時に既に +4 されているため、現在の命令アドレスは pc - 4
-            self.pc = (self.pc - 4).wrapping_add(offset as u64);
+            self.pc = self.pc.wrapping_add(offset as u64);
         }
     }
 
@@ -424,15 +438,17 @@ impl Cpu {
 
     /// Jump 命令用ヘルパー: rd に戻り先アドレスを書き込み、PC を target にジャンプします。
     #[inline(always)]
-    fn op_jump(&mut self, rd: RegIdx, target: u64) {
-        let next_pc = self.pc; // NOTE: fetch 後なので既に +4 されている
-        self.write_register(rd, next_pc);
+    fn op_jump(&mut self, ctx: InstructionContext, rd: RegIdx, target: u64) {
+        self.write_register(rd, ctx.next_pc);
         self.pc = target;
     }
 
     /// 命令を実行します。
-    pub fn execute(&mut self, instruction: Instruction) -> Result<(), Exception> {
-        Ok(match instruction {
+    pub fn execute(&mut self, ctx: InstructionContext) -> Result<(), Exception> {
+        let current_pc = self.pc;
+        let next_pc = ctx.next_pc;
+
+        match ctx.instruction {
             // NOTE: RV32I R-Type
             Instruction::ADD  { rd, rs1, rs2 } => self.op_rr(rd, rs1, rs2, |v1, v2| v1.wrapping_add(v2)),
             Instruction::SUB  { rd, rs1, rs2 } => self.op_rr(rd, rs1, rs2, |v1, v2| v1.wrapping_sub(v2)),
@@ -572,21 +588,28 @@ impl Cpu {
 
             // NOTE: RV32I U-Type
             Instruction::LUI   { rd, imm } => self.write_register(rd, imm as u64),
-            Instruction::AUIPC { rd, imm } => self.write_register(rd, (self.pc - 4).wrapping_add(imm as u64)),
+            Instruction::AUIPC { rd, imm } => self.write_register(rd, self.pc.wrapping_add(imm as u64)),
 
             // NOTE: RV32I J-Type
             Instruction::JAL { rd, offset } => {
-                let target = (self.pc - 4).wrapping_add(offset as u64);
-                self.op_jump(rd, target);
+                let target = self.pc.wrapping_add(offset as u64);
+                self.op_jump(ctx, rd, target);
             },
             Instruction::JALR { rd, rs1, offset } => {
                 // NOTE: JALR は rs1 + offset の最下位ビットを0にする仕様がある
                 let target = (self.read_register(rs1).wrapping_add(offset as u64)) & !1;
-                self.op_jump(rd, target);
+                self.op_jump(ctx, rd, target);
             },
 
             // NOTE: RV32I System
             Instruction::EBREAK => {},
-        })
+        }
+
+        if current_pc == self.pc {
+            // NOTE: 命令によって PC が更新されていなければ、次の命令へ進む
+            self.pc = next_pc;
+        }
+
+        Ok(())
     }
 }

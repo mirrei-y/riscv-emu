@@ -26,7 +26,8 @@ Linux を動かすなら RV64GC (RV64 + Integer + Multiply + Atomic + Float + Do
 - フェーズ 2: RV64IM**C** (圧縮命令)
     - RISC-V は、基本 32bit 命令だけど、16bit 命令も定義されていて、それを圧縮命令と呼ぶ
     - 命令をフェッチした直後、`下位2ビット != 11` なら圧縮命令なので、それを 32bit に置き換えてからデコードに回す
-        - `decode(fetch())` -> `decode(expand(fetch()))` のイメージ
+        - ~~`decode(fetch())` -> `decode(expand(fetch()))` のイメージ~~
+        - `fetch()` の結果を見て、`decode()` か `decode_compressed()` に振り分けるイメージに変更
     - 圧縮って Zlib 的なことをハードウェアでアクセラレーションするのかと思ってた、意外と簡単らしい
 
 メモリ上で動く計算機。フィボナッチ数列計算とかできる。
