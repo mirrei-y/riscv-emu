@@ -213,7 +213,7 @@ impl Cpu {
                     0b110 => Ok(Instruction::ORI { rd, rs1, imm }),
                     0b111 => Ok(Instruction::ANDI { rd, rs1, imm }),
                     0b001 => Ok(Instruction::SLLI { rd, rs1, shamt }),
-                    0b101 => Ok(if imm & 0b10000000000 != 0 {
+                    0b101 => Ok(if imm & 0b10000000000 == 0 {
                         Instruction::SRLI { rd, rs1, shamt }
                     } else {
                         Instruction::SRAI { rd, rs1, shamt }
