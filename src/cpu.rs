@@ -1,6 +1,6 @@
 mod decode;
 
-use crate::{Exception, Imm, Instruction, InstructionContext, RegIdx, XLEN, bus::Bus};
+use crate::{Exception, Imm, Instruction, InstructionContext, RawInstruction, RawShortInstruction, RegIdx, XLEN, bus::Bus};
 
 /// CPU
 pub struct Cpu {
@@ -43,13 +43,13 @@ impl Cpu {
         Ok(instruction)
     }
 
-    pub fn decode(&self, instruction: u64) -> Result<InstructionContext, Exception> {
+    pub fn decode(&self, instruction: RawInstruction) -> Result<InstructionContext, Exception> {
         Ok(InstructionContext {
             instruction: decode::decode(instruction)?,
             next_pc: self.pc + 4,
         })
     }
-    pub fn decode_compressed(&self, instruction: u16) -> Result<InstructionContext, Exception> {
+    pub fn decode_compressed(&self, instruction: RawShortInstruction) -> Result<InstructionContext, Exception> {
         Ok(InstructionContext {
             instruction: decode::decode_compressed(instruction)?,
             next_pc: self.pc + 2,

@@ -1,8 +1,7 @@
-use crate::{Exception, Imm, Instruction, RegIdx, Shamt};
+use crate::{Exception, Imm, Instruction, RawInstruction, RawShortInstruction, RegIdx, Shamt};
 
-// TODO: fetch() の戻り値、および decode() の引数を u32 に変更したい
 /// 命令をデコードします。
-pub fn decode(instruction: u64) -> Result<Instruction, Exception> {
+pub fn decode(instruction: RawInstruction) -> Result<Instruction, Exception> {
     let opcode = instruction & 0b111_1111;
     let rd = ((instruction >> 7) & 0b1_1111) as RegIdx; // 宛先レジスタ
     let funct3 = (instruction >> 12) & 0b111; // 細分類その1
@@ -197,7 +196,7 @@ pub fn decode(instruction: u64) -> Result<Instruction, Exception> {
 }
 
 /// 圧縮命令をデコードします。
-pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
+pub fn decode_compressed(instruction: RawShortInstruction) -> Result<Instruction, Exception> {
     let opcode = instruction & 0b11;
     let funct3 = (instruction >> 13) & 0b111;
 
@@ -211,7 +210,7 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
             // NOTE: C.ADDI4SPN (addi rd', x2, nzuimm)
             0b000 => {
                 let rd = to_register(instruction >> 2);
-                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                 // NOTE: nzuimm[5:4|9:6|2|3] (12-5 bit)
                 let nzuimm = ((instruction >> 7) & 0b11_0000)
                     | ((instruction >> 1) & 0b11_1100_0000)
@@ -221,7 +220,7 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
             },
             // NOTE: C.FLD
             // TODO: Phase 7 (RV64F/D) で実装
-            0b001 => Err(Exception::UnknownInstruction(instruction as u64)),
+            0b001 => Err(Exception::UnknownInstruction(instruction as RawInstruction)),
             // NOTE: C.LW (lw rd', offset(rs1'))
             0b010 => {
                 let rd = to_register(instruction >> 2);
@@ -244,7 +243,7 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
             },
             // NOTE: C.FSD
             // TODO: Phase 7 (RV64F/D) で実装
-            0b101 => Err(Exception::UnknownInstruction(instruction as u64)),
+            0b101 => Err(Exception::UnknownInstruction(instruction as RawInstruction)),
             // NOTE: C.SW (sw rs2', offset(rs1'))
             0b110 => {
                 let rs2 = to_register(instruction >> 2);
@@ -265,7 +264,7 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
                 Ok(Instruction::SD { rs1, rs2, offset: uimm as Imm })
             },
 
-            _ => Err(Exception::UnknownInstruction(instruction as u64)),
+            _ => Err(Exception::UnknownInstruction(instruction as RawInstruction)),
         },
         0b01 => match funct3 {
             // NOTE: C.NOP / C.ADDI
@@ -287,7 +286,7 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
             // NOTE: C.ADDIW (RV64)
             0b001 => {
                 let rd = as_register(instruction >> 7);
-                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                 let imm_val = (instruction as i16 >> 7) & 0b10_0000
                     | ((instruction >> 2) & 0b1_1111) as i16;
                 let imm = ((imm_val << 10) >> 10) as Imm;
@@ -296,7 +295,7 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
             // NOTE: C.LI (addi rd, x0, imm)
             0b010 => {
                 let rd = as_register(instruction >> 7);
-                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                 let imm_val = (instruction as i16 >> 7) & 0b10_0000
                     | ((instruction >> 2) & 0b1_1111) as i16;
                 let imm = ((imm_val << 10) >> 10) as Imm;
@@ -315,7 +314,7 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
                         | ((instruction << 3) & 0b10_0000);
                     // NOTE: sign extend from bit 9
                     let nzimm = (((imm_val as i16) << 6) >> 6) as Imm;
-                    if nzimm == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                    if nzimm == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                     Ok(Instruction::ADDI { rd: 2, rs1: 2, imm: nzimm })
                 } else if rd != 0 {
                     // NOTE: C.LUI
@@ -324,10 +323,10 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
                         | ((instruction >> 2) & 0b1_1111);
                     // NOTE: sign extend from bit 17 (bit 5 in imm_val)
                     let nzimm = (((imm_val as i32) << 26) >> 26) as Imm;
-                    if nzimm == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                    if nzimm == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                     Ok(Instruction::LUI { rd, imm: nzimm << 12 })
                 } else {
-                    Err(Exception::UnknownInstruction(instruction as u64))
+                    Err(Exception::UnknownInstruction(instruction as RawInstruction))
                 }
             },
             0b100 => {
@@ -362,11 +361,11 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
                             (0, 0b11) => Ok(Instruction::AND { rd, rs1: rd, rs2 }),
                             (1, 0b00) => Ok(Instruction::SUBW { rd, rs1: rd, rs2 }), // RV64
                             (1, 0b01) => Ok(Instruction::ADDW { rd, rs1: rd, rs2 }), // RV64
-                            _ => Err(Exception::UnknownInstruction(instruction as u64)),
+                            _ => Err(Exception::UnknownInstruction(instruction as RawInstruction)),
                         }
                     },
 
-                    _ => Err(Exception::UnknownInstruction(instruction as u64)),
+                    _ => Err(Exception::UnknownInstruction(instruction as RawInstruction)),
                 }
             },
             // NOTE: C.J (jal x0, offset)
@@ -408,13 +407,13 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
                 Ok(Instruction::BNE { rs1, rs2: 0, offset })
             },
 
-            _ => Err(Exception::UnknownInstruction(instruction as u64)),
+            _ => Err(Exception::UnknownInstruction(instruction as RawInstruction)),
         },
         0b10 => match funct3 {
             // NOTE: C.SLLI (slli rd, rd, shamt)
             0b000 => {
                 let rd = as_register(instruction >> 7);
-                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                 // NOTE: shamt[5|4:0] encoded in bit 12 | 6:2
                 let shamt = ((instruction >> 7) & 0b10_0000)
                     | ((instruction >> 2) & 0b1_1111);
@@ -422,11 +421,11 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
             },
             // NOTE: C.FLDSP
             // TODO: Phase 7
-            0b001 => Err(Exception::UnknownInstruction(instruction as u64)),
+            0b001 => Err(Exception::UnknownInstruction(instruction as RawInstruction)),
             // NOTE: C.LWSP (lw rd, offset(x2))
             0b010 => {
                 let rd = as_register(instruction >> 7);
-                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                 // NOTE: uimm[5|4:2|7:6] * 4
                 let uimm = ((instruction >> 7) & 0b10_0000)
                     | ((instruction >> 2) & 0b01_1100)
@@ -436,7 +435,7 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
             // NOTE: C.LDSP (ld rd, offset(x2)) (RV64)
             0b011 => {
                 let rd = as_register(instruction >> 7);
-                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                if rd == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                 // NOTE: uimm[5|4:3|8:6] * 8
                 let uimm = ((instruction >> 7) & 0b10_0000)
                     | ((instruction >> 2) & 0b01_1000)
@@ -451,11 +450,11 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
                 if bit12 == 0 {
                     if rs2 == 0 {
                         // NOTE: C.JR (jalr x0, rs1, 0)
-                        if rs1 == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                        if rs1 == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                         Ok(Instruction::JALR { rd: 0, rs1, offset: 0 })
                     } else {
                         // NOTE: C.MV (add rd, x0, rs2)
-                        if rs1 == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                        if rs1 == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                         Ok(Instruction::ADD { rd: rs1, rs1: 0, rs2 })
                     }
                 } else {
@@ -469,14 +468,14 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
                         }
                     } else {
                         // NOTE: C.ADD (add rd, rd, rs2)
-                        if rs1 == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                        if rs1 == 0 { return Err(Exception::UnknownInstruction(instruction as RawInstruction)); }
                         Ok(Instruction::ADD { rd: rs1, rs1, rs2 })
                     }
                 }
             },
             // NOTE: C.FSDSP
             // TODO: Phase 7
-            0b101 => Err(Exception::UnknownInstruction(instruction as u64)),
+            0b101 => Err(Exception::UnknownInstruction(instruction as RawInstruction)),
             // NOTE: C.SWSP (sw rs2, offset(x2))
             0b110 => {
                 let rs2 = as_register(instruction >> 2);
@@ -494,9 +493,9 @@ pub fn decode_compressed(instruction: u16) -> Result<Instruction, Exception> {
                 Ok(Instruction::SD { rs1: 2, rs2, offset: uimm as Imm })
             }
 
-            _ => Err(Exception::UnknownInstruction(instruction as u64)),
+            _ => Err(Exception::UnknownInstruction(instruction as RawInstruction)),
         },
 
-        _ => Err(Exception::UnknownInstruction(instruction as u64)), // NOTE: opcode = 11 は 32 bit 命令
+        _ => Err(Exception::UnknownInstruction(instruction as RawInstruction)), // NOTE: opcode = 11 は 32 bit 命令
     }?)
 }

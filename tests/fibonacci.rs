@@ -1,4 +1,4 @@
-use riscv_emu::{Cpu, Instruction, Bus, Memory};
+use riscv_emu::{Bus, Cpu, Instruction, Memory, RawInstruction, RawShortInstruction};
 
 #[test]
 fn test_fibonacci() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,9 +38,9 @@ fn test_fibonacci() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let ctx = if instruction & 0b11 != 0b11 {
-            cpu.decode_compressed(instruction as u16)
+            cpu.decode_compressed(instruction as RawShortInstruction)
         } else {
-            cpu.decode(instruction)
+            cpu.decode(instruction as RawInstruction)
         };
         let ctx = match ctx {
             Ok(ctx) => ctx,

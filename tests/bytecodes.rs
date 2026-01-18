@@ -4,7 +4,7 @@ use elf::endian::LittleEndian;
 use elf::ElfBytes;
 use elf::abi::PT_LOAD;
 
-use riscv_emu::{Bus, Cpu, Instruction, Memory, Exception};
+use riscv_emu::{Bus, Cpu, Exception, Instruction, Memory, RawInstruction, RawShortInstruction};
 
 fn run_vm(path: &Path) -> Result<(), Exception> {
     let file_data = fs::read(path).expect("Could not read file");
@@ -41,9 +41,9 @@ fn run_vm(path: &Path) -> Result<(), Exception> {
 
         let instruction = cpu.fetch()?;
         let ctx = if instruction & 0b11 != 0b11 {
-            cpu.decode_compressed(instruction as u16)
+            cpu.decode_compressed(instruction as RawShortInstruction)
         } else {
-            cpu.decode(instruction)
+            cpu.decode(instruction as RawInstruction)
         }?;
 
         println!("Execute: {:?}", ctx);

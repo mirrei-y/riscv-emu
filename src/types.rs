@@ -1,3 +1,9 @@
+/// メモリアドレス
+pub type Address = u64;
+/// 生の命令
+pub type RawInstruction = u32;
+/// 生の短縮命令
+pub type RawShortInstruction = u16;
 /// レジスタ番号 (Register Index)
 pub type RegIdx = u8;
 /// 即値 (Immediate)
@@ -12,7 +18,7 @@ pub const XLEN: u8 = 64;
 #[derive(Debug)]
 pub enum Exception {
     /// 未知の命令
-    UnknownInstruction(u64),
+    UnknownInstruction(RawInstruction),
     /// 不正なメモリアクセス
-    InvalidMemoryAccess(u64),
+    InvalidMemoryAccess(Address),
 }
