@@ -1,10 +1,7 @@
-use crate::{cpu::{Cpu, Instruction}, bus::Bus, memory::Memory};
+use riscv_emu::{cpu::{Cpu, Instruction}, bus::Bus, memory::Memory};
 
-mod cpu;
-mod bus;
-mod memory;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[test]
+fn test_fibonacci() -> Result<(), Box<dyn std::error::Error>> {
     let memory = Memory::new(1024 * 1024 * 4);
     let mut bus = Bus::new(memory);
 
@@ -57,10 +54,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Instruction::EBREAK = ctx.instruction {
             println!("A register state at EBREAK: {}", cpu.read_register(10));
             println!("EBREAK encountered. Halting execution.");
+            // Fib(10) = 55
+            assert_eq!(cpu.read_register(10), 55);
             break;
         }
 
-        cpu.execute(ctx);
+        if let Err(e) = cpu.execute(ctx) {
+            println!("Execution error: {:?}", e);
+            break;
+        }
     }
 
     Ok(())
