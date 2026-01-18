@@ -158,6 +158,7 @@ impl Cpu {
         Ok(instruction)
     }
 
+    // TODO: fetch() の戻り値、および decode() の引数を u32 に変更したい
     /// 命令をデコードします。
     pub fn decode(&self, instruction: u64) -> Result<InstructionContext, Exception> {
         let opcode = instruction & 0b111_1111;
@@ -355,6 +356,316 @@ impl Cpu {
         Ok(InstructionContext {
             instruction,
             next_pc: self.pc + 4,
+        })
+    }
+
+    /// 圧縮命令をデコードします。
+    pub fn decode_compressed(&self, instruction: u16) -> Result<InstructionContext, Exception> {
+        let opcode = instruction & 0b11;
+        let funct3 = (instruction >> 13) & 0b111;
+
+        // NOTE: 圧縮命令のレジスタ表現 rd', rs1', rs2' を通常のレジスタ番号に変換するクロージャ
+        let to_register = |x: u16| ((x & 0b111) + 8) as RegIdx;
+        // NOTE: 5bit レジスタをそのまま使うクロージャ
+        let as_register = |x: u16| (x & 0b1_1111) as RegIdx;
+
+        let instruction = match opcode {
+            0b00 => match funct3 {
+                // NOTE: C.ADDI4SPN (addi rd', x2, nzuimm)
+                0b000 => {
+                    let rd = to_register(instruction >> 2);
+                    if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                    // NOTE: nzuimm[5:4|9:6|2|3] (12-5 bit)
+                    let nzuimm = ((instruction >> 7) & 0b11_0000)
+                        | ((instruction >> 1) & 0b11_1100_0000)
+                        | ((instruction >> 4) & 0b100)
+                        | ((instruction >> 2) & 0b1000);
+                    Ok(Instruction::ADDI { rd, rs1: 2, imm: nzuimm as Imm })
+                },
+                // NOTE: C.FLD
+                // TODO: Phase 7 (RV64F/D) で実装
+                0b001 => Err(Exception::UnknownInstruction(instruction as u64)),
+                // NOTE: C.LW (lw rd', offset(rs1'))
+                0b010 => {
+                    let rd = to_register(instruction >> 2);
+                    let rs1 = to_register(instruction >> 7);
+                    // NOTE: uimm[5:3|2|6] * 4
+                    let uimm = ((instruction >> 7) & 0b11_1000)
+                        | ((instruction >> 4) & 0b100)
+                        | ((instruction << 1) & 0b100_0000);
+                    Ok(Instruction::LW { rd, rs1, offset: uimm as Imm })
+                },
+                // NOTE: C.LD (ld rd', offset(rs1')) (RV64)
+                0b011 => {
+                    // RV64 なので C.LD として実装
+                    let rd = to_register(instruction >> 2);
+                    let rs1 = to_register(instruction >> 7);
+                    // NOTE: uimm[5:3|7:6] * 8
+                    let uimm = ((instruction >> 7) & 0b11_1000)
+                        | ((instruction << 1) & 0b1100_0000);
+                    Ok(Instruction::LD { rd, rs1, offset: uimm as Imm })
+                },
+                // NOTE: C.FSD
+                // TODO: Phase 7 (RV64F/D) で実装
+                0b101 => Err(Exception::UnknownInstruction(instruction as u64)),
+                // NOTE: C.SW (sw rs2', offset(rs1'))
+                0b110 => {
+                    let rs2 = to_register(instruction >> 2);
+                    let rs1 = to_register(instruction >> 7);
+                    // NOTE: uimm[5:3|2|6] * 4
+                    let uimm = ((instruction >> 7) & 0b11_1000)
+                        | ((instruction >> 4) & 0b100)
+                        | ((instruction << 1) & 0b100_0000);
+                    Ok(Instruction::SW { rs1, rs2, offset: uimm as Imm })
+                },
+                // NOTE: C.SD (sd rs2', offset(rs1')) (RV64)
+                0b111 => {
+                    let rs2 = to_register(instruction >> 2);
+                    let rs1 = to_register(instruction >> 7);
+                    // NOTE: uimm[5:3|7:6] * 8
+                    let uimm = ((instruction >> 7) & 0b11_1000)
+                        | ((instruction << 1) & 0b1100_0000);
+                    Ok(Instruction::SD { rs1, rs2, offset: uimm as Imm })
+                },
+
+                _ => Err(Exception::UnknownInstruction(instruction as u64)),
+            },
+            0b01 => match funct3 {
+                // NOTE: C.NOP / C.ADDI
+                0b000 => {
+                    let rd = as_register(instruction >> 7);
+                    let imm_val = (instruction as i16 >> 7) & 0b10_0000 // bit 5 (sign ext source)
+                        | ((instruction >> 2) & 0b1_1111) as i16;
+                    let nzimm = ((imm_val << 10) >> 10) as Imm; // NOTE: 6bit sign-extend
+
+                    if rd == 0 {
+                        // NOTE: NOP (ADDI x0, x0, 0)
+                        // TODO: rd = 0 かつ imm != 0 は HINT 命令らしい
+                        Ok(Instruction::ADDI { rd: 0, rs1: 0, imm: 0 })
+                    } else {
+                        // NOTE: C.ADDI (addi rd, rd, nzimm)
+                        Ok(Instruction::ADDI { rd, rs1: rd, imm: nzimm })
+                    }
+                },
+                // NOTE: C.ADDIW (RV64)
+                0b001 => {
+                    let rd = as_register(instruction >> 7);
+                    if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                    let imm_val = (instruction as i16 >> 7) & 0b10_0000
+                        | ((instruction >> 2) & 0b1_1111) as i16;
+                    let imm = ((imm_val << 10) >> 10) as Imm;
+                    Ok(Instruction::ADDIW { rd, rs1: rd, imm })
+                },
+                // NOTE: C.LI (addi rd, x0, imm)
+                0b010 => {
+                    let rd = as_register(instruction >> 7);
+                    if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                    let imm_val = (instruction as i16 >> 7) & 0b10_0000
+                        | ((instruction >> 2) & 0b1_1111) as i16;
+                    let imm = ((imm_val << 10) >> 10) as Imm;
+                    Ok(Instruction::ADDI { rd, rs1: 0, imm })
+                },
+                // NOTE: C.ADDI16SP (addi x2, x2, nzimm) / C.LUI (lui rd, nzimm)
+                0b011 => {
+                    let rd = as_register(instruction >> 7);
+                    if rd == 2 {
+                        // NOTE: C.ADDI16SP
+                        // NOTE: nzimm[9|4|6|8:7|5] * 16
+                        let imm_val = ((instruction >> 3) & 0b10_0000_0000)
+                            | ((instruction >> 2) & 0b1_0000)
+                            | ((instruction << 1) & 0b100_0000)
+                            | ((instruction << 4) & 0b1_1000_0000)
+                            | ((instruction << 3) & 0b10_0000);
+                        // NOTE: sign extend from bit 9
+                        let nzimm = (((imm_val as i16) << 6) >> 6) as Imm;
+                        if nzimm == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                        Ok(Instruction::ADDI { rd: 2, rs1: 2, imm: nzimm })
+                    } else if rd != 0 {
+                        // NOTE: C.LUI
+                        // NOTE: nzimm[17|16:12] (inst bits 12 | 6:2)
+                        let imm_val = ((instruction >> 7) & 0b10_0000)
+                            | ((instruction >> 2) & 0b1_1111);
+                        // NOTE: sign extend from bit 17 (bit 5 in imm_val)
+                        let nzimm = (((imm_val as i32) << 26) >> 26) as Imm;
+                        if nzimm == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                        Ok(Instruction::LUI { rd, imm: nzimm << 12 })
+                    } else {
+                        Err(Exception::UnknownInstruction(instruction as u64))
+                    }
+                },
+                0b100 => {
+                    let funct2 = (instruction >> 10) & 0b11;
+                    let rd = to_register(instruction >> 7); // rd' / rs1'
+                    let bit12 = (instruction >> 12) & 1;
+                    let imm_shamt = ((instruction >> 7) & 0b10_0000) | ((instruction >> 2) & 0b1_1111); // imm[5|4:0]
+
+                    match funct2 {
+                        0b00 => {
+                            // NOTE: C.SRLI (srli rd', rd', shamt)
+                            let shamt = (bit12 << 5) | imm_shamt;
+                            Ok(Instruction::SRLI { rd, rs1: rd, shamt: shamt as Shamt })
+                        },
+                        0b01 => {
+                            // NOTE: C.SRAI (srai rd', rd', shamt)
+                            let shamt = (bit12 << 5) | imm_shamt;
+                            Ok(Instruction::SRAI { rd, rs1: rd, shamt: shamt as Shamt })
+                        },
+                        0b10 => {
+                            // NOTE: C.ANDI (andi rd', rd', imm)
+                            let imm = (((imm_shamt as i8) << 2) >> 2) as Imm;
+                            Ok(Instruction::ANDI { rd, rs1: rd, imm })
+                        },
+                        0b11 => {
+                            let rs2 = to_register(instruction >> 2);
+                            let op_sub = (instruction >> 5) & 0b11;
+                            match (bit12, op_sub) {
+                                (0, 0b00) => Ok(Instruction::SUB { rd, rs1: rd, rs2 }),
+                                (0, 0b01) => Ok(Instruction::XOR { rd, rs1: rd, rs2 }),
+                                (0, 0b10) => Ok(Instruction::OR  { rd, rs1: rd, rs2 }),
+                                (0, 0b11) => Ok(Instruction::AND { rd, rs1: rd, rs2 }),
+                                (1, 0b00) => Ok(Instruction::SUBW { rd, rs1: rd, rs2 }), // RV64
+                                (1, 0b01) => Ok(Instruction::ADDW { rd, rs1: rd, rs2 }), // RV64
+                                _ => Err(Exception::UnknownInstruction(instruction as u64)),
+                            }
+                        },
+
+                        _ => Err(Exception::UnknownInstruction(instruction as u64)),
+                    }
+                },
+                // NOTE: C.J (jal x0, offset)
+                0b101 => {
+                    // NOTE: offset[11|4|9:8|10|6|7|3:1|5]
+                    let offset = ((instruction >> 1) & 0b1000_0000_0000)
+                        | ((instruction >> 7) & 0b1_0000)
+                        | ((instruction >> 1) & 0b11_0000_0000)
+                        | ((instruction << 2) & 0b100_0000_0000)
+                        | ((instruction >> 1) & 0b100_0000)
+                        | ((instruction << 1) & 0b1000_0000)
+                        | ((instruction >> 2) & 0b1110)
+                        | ((instruction << 3) & 0b10_0000);
+                    let offset = (((offset as i16) << 4) >> 4) as Imm;
+                    Ok(Instruction::JAL { rd: 0, offset })
+                },
+                // NOTE: C.BEQZ (beq rs1', x0, offset)
+                0b110 => {
+                    let rs1 = to_register(instruction >> 7);
+                    // NOTE: offset[8|4:3|7:6|2:1|5]
+                    let offset = ((instruction >> 4) & 0b1_0000_0000)
+                        | ((instruction >> 7) & 0b1_1000)
+                        | ((instruction << 1) & 0b1100_0000)
+                        | ((instruction >> 2) & 0b110)
+                        | ((instruction << 3) & 0b10_0000);
+                    let offset = (((offset as i16) << 7) >> 7) as Imm;
+                    Ok(Instruction::BEQ { rs1, rs2: 0, offset })
+                },
+                // NOTE: C.BNEZ (bne rs1', x0, offset)
+                0b111 => {
+                    let rs1 = to_register(instruction >> 7);
+                    // NOTE: offset のビット配置は C.BEQZ と同じ
+                    let offset = ((instruction >> 4) & 0b1_0000_0000)
+                        | ((instruction >> 7) & 0b1_1000)
+                        | ((instruction << 1) & 0b1100_0000)
+                        | ((instruction >> 2) & 0b110)
+                        | ((instruction << 3) & 0b10_0000);
+                    let offset = (((offset as i16) << 7) >> 7) as Imm;
+                    Ok(Instruction::BNE { rs1, rs2: 0, offset })
+                },
+
+                _ => Err(Exception::UnknownInstruction(instruction as u64)),
+            },
+            0b10 => match funct3 {
+                // NOTE: C.SLLI (slli rd, rd, shamt)
+                0b000 => {
+                    let rd = as_register(instruction >> 7);
+                    if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                    // NOTE: shamt[5|4:0] encoded in bit 12 | 6:2
+                    let shamt = ((instruction >> 7) & 0b10_0000)
+                        | ((instruction >> 2) & 0b1_1111);
+                    Ok(Instruction::SLLI { rd, rs1: rd, shamt: shamt as Shamt })
+                },
+                // NOTE: C.FLDSP
+                // TODO: Phase 7
+                0b001 => Err(Exception::UnknownInstruction(instruction as u64)),
+                // NOTE: C.LWSP (lw rd, offset(x2))
+                0b010 => {
+                    let rd = as_register(instruction >> 7);
+                    if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                    // NOTE: uimm[5|4:2|7:6] * 4
+                    let uimm = ((instruction >> 7) & 0b10_0000)
+                        | ((instruction >> 2) & 0b01_1100)
+                        | ((instruction << 4) & 0b1100_0000);
+                    Ok(Instruction::LW { rd, rs1: 2, offset: uimm as Imm })
+                },
+                // NOTE: C.LDSP (ld rd, offset(x2)) (RV64)
+                0b011 => {
+                    let rd = as_register(instruction >> 7);
+                    if rd == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                    // NOTE: uimm[5|4:3|8:6] * 8
+                    let uimm = ((instruction >> 7) & 0b10_0000)
+                        | ((instruction >> 2) & 0b01_1000)
+                        | ((instruction << 4) & 0b1_1100_0000);
+                    Ok(Instruction::LD { rd, rs1: 2, offset: uimm as Imm })
+                },
+                0b100 => {
+                    let bit12 = (instruction >> 12) & 1;
+                    let rs1 = as_register(instruction >> 7); // rd / rs1
+                    let rs2 = as_register(instruction >> 2); // rs2
+
+                    if bit12 == 0 {
+                        if rs2 == 0 {
+                            // NOTE: C.JR (jalr x0, rs1, 0)
+                            if rs1 == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                            Ok(Instruction::JALR { rd: 0, rs1, offset: 0 })
+                        } else {
+                            // NOTE: C.MV (add rd, x0, rs2)
+                            if rs1 == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                            Ok(Instruction::ADD { rd: rs1, rs1: 0, rs2 })
+                        }
+                    } else {
+                        if rs2 == 0 {
+                            if rs1 == 0 {
+                                // NOTE: C.EBREAK
+                                Ok(Instruction::EBREAK)
+                            } else {
+                                // NOTE: C.JALR (jalr x1, rs1, 0)
+                                Ok(Instruction::JALR { rd: 1, rs1, offset: 0 })
+                            }
+                        } else {
+                            // NOTE: C.ADD (add rd, rd, rs2)
+                            if rs1 == 0 { return Err(Exception::UnknownInstruction(instruction as u64)); }
+                            Ok(Instruction::ADD { rd: rs1, rs1, rs2 })
+                        }
+                    }
+                },
+                // NOTE: C.FSDSP
+                // TODO: Phase 7
+                0b101 => Err(Exception::UnknownInstruction(instruction as u64)),
+                // NOTE: C.SWSP (sw rs2, offset(x2))
+                0b110 => {
+                    let rs2 = as_register(instruction >> 2);
+                    // NOTE: uimm[5:2|7:6] * 4
+                    let uimm = ((instruction >> 7) & 0b11_1100)
+                        | ((instruction >> 1) & 0b1100_0000);
+                    Ok(Instruction::SW { rs1: 2, rs2, offset: uimm as Imm })
+                },
+                // NOTE: C.SDSP (sd rs2, offset(x2)) (RV64)
+                0b111 => {
+                    let rs2 = as_register(instruction >> 2);
+                    // NOTE: uimm[5:3|8:6] * 8
+                    let uimm = ((instruction >> 7) & 0b11_1000)
+                        | ((instruction >> 1) & 0b1_1100_0000);
+                    Ok(Instruction::SD { rs1: 2, rs2, offset: uimm as Imm })
+                }
+
+                _ => Err(Exception::UnknownInstruction(instruction as u64)),
+            },
+
+            _ => Err(Exception::UnknownInstruction(instruction as u64)), // NOTE: opcode = 11 は 32 bit 命令
+        }?;
+
+        Ok(InstructionContext {
+            instruction,
+            next_pc: self.pc + 2,
         })
     }
 

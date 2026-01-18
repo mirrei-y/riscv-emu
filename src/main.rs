@@ -40,23 +40,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // 命令をデコード
-        match cpu.decode(instruction) {
-            Ok(inst) => {
-                println!("Execute: {:?}", inst);
-                if let Instruction::EBREAK = inst.instruction {
-                    println!("A register state at EBREAK: {}", cpu.read_register(10));
-                    println!("EBREAK encountered. Halting execution.");
-                    break;
-                }
-
-                cpu.execute(inst);
-            }
+        let ctx = if instruction & 0b11 != 0b11 {
+            cpu.decode_compressed(instruction as u16)
+        } else {
+            cpu.decode(instruction)
+        };
+        let ctx = match ctx {
+            Ok(ctx) => ctx,
             Err(e) => {
                 println!("Decode error: {:?}", e);
                 break;
             }
+        };
+
+        println!("Execute: {:?}", ctx);
+        if let Instruction::EBREAK = ctx.instruction {
+            println!("A register state at EBREAK: {}", cpu.read_register(10));
+            println!("EBREAK encountered. Halting execution.");
+            break;
         }
+
+        cpu.execute(ctx);
     }
 
     Ok(())
