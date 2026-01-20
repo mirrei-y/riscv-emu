@@ -62,7 +62,8 @@ fn run_vm_glob(pattern: &str) -> Result<(), Exception> {
     for entry in glob::glob(pattern).expect("Failed to read glob pattern") {
         match entry {
             Ok(path) => {
-                println!("Running test for: {:?}", path);
+                let assembly_path = path.parent().unwrap().parent().unwrap().join("dumps").join(path.file_name().unwrap()).with_added_extension("dump");
+                println!("Running test for:\n    Bytecode: {:?}\n    Assembly: {:?}", path, assembly_path);
                 run_vm(&path)?
             }
             Err(e) => println!("{:?}", e),
