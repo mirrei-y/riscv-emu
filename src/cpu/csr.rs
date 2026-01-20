@@ -1,4 +1,6 @@
-use crate::Exception;
+mod mstatus;
+
+use crate::{Exception, cpu::csr::mstatus::Mstatus};
 
 pub const CSR_MHARTID: u16 = 0xF14;
 pub const CSR_MISA: u16 = 0x301;
@@ -30,6 +32,8 @@ impl Csr {
             Ok(0) // TODO: シングルコア
         } else if addr == CSR_MISA {
             Ok(MISA_64BIT | ext(b'I') | ext(b'M') | ext(b'C'))
+        } else if addr == CSR_MSTATUS {
+            Ok(Mstatus::new(self.data[addr as usize]).read())
         } else {
             Ok(self.data[addr as usize])
         }
@@ -43,6 +47,14 @@ impl Csr {
         if addr == CSR_MHARTID || addr == CSR_MISA {
             return;
         }
-        self.data[addr as usize] = val;
+        self.data[addr as usize] = if addr == CSR_MSTATUS {
+            Mstatus::new(self.data[addr as usize]).write(val, mstatus::Extensions {
+                has_fpu: false,
+                has_vector: false,
+                is_rv64: true,
+            }).read()
+        } else {
+            val
+        };
     }
 }
