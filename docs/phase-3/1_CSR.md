@@ -101,3 +101,52 @@ EBREAK の判別処理の手前で少し match を分岐させた。
 
 CSR* については無事テストをパスした。
 とはいえ、まだ CSR に代入することしかしていないので、果たして本当にパスしたと言えるかは怪しいが……。
+
+## 特例処理の追加
+
+### rd = x0, rs1 = x0
+
+パスしたからいいかと思っていたら、Gemini からのフィードバックで「`rd = x0` などの際、特別処理を追加する必要がある」と言われた。
+
+rd によって書き込む・書き込まないが決まってしまうので、csr.rs の `execute_*` 関数はひとまず全部削除。cpu.rs の execute 関数内で直接 CSR を触ってしまうことにした。
+
+```rust
+Instruction::CSRRW { rd, rs1, csr } => {
+    let old_value = if rd != 0 { self.csr.read(csr)? } else { 0 };
+    self.csr.write(csr, self.read_register(rs1));
+    self.write_register(rd, old_value);
+}
+Instruction::CSRRS { rd, rs1, csr } => {
+    let old_value = self.csr.read(csr)?;
+    if rs1 != 0 {
+        self.csr.write(csr, old_value | self.read_register(rs1));
+    }
+    self.write_register(rd, old_value);
+}
+Instruction::CSRRC { rd, rs1, csr } => {
+    let old_value = self.csr.read(csr)?;
+    if rs1 != 0 {
+        self.csr.write(csr, old_value & !self.read_register(rs1));
+    }
+    self.write_register(rd, old_value);
+}
+Instruction::CSRRWI { rd, imm, csr } => {
+    let old_value = if rd != 0 { self.csr.read(csr)? } else { 0 };
+    self.csr.write(csr, imm as u64);
+    self.write_register(rd, old_value);
+}
+Instruction::CSRRSI { rd, imm, csr } => {
+    let old_value = self.csr.read(csr)?;
+    if imm != 0 {
+        self.csr.write(csr, old_value | (imm as u64));
+    }
+    self.write_register(rd, old_value);
+}
+Instruction::CSRRCI { rd, imm, csr } => {
+    let old_value = self.csr.read(csr)?;
+    if imm != 0 {
+        self.csr.write(csr, old_value & !(imm as u64));
+    }
+    self.write_register(rd, old_value);
+}
+```

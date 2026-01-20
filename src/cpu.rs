@@ -307,28 +307,42 @@ impl Cpu {
             Instruction::ECALL => {},
             Instruction::EBREAK => {},
             Instruction::CSRRW { rd, rs1, csr } => {
-                let val = self.csr.execute_rw(csr, self.read_register(rs1))?;
-                self.write_register(rd, val);
+                let old_value = if rd != 0 { self.csr.read(csr)? } else { 0 };
+                self.csr.write(csr, self.read_register(rs1));
+                self.write_register(rd, old_value);
             }
             Instruction::CSRRS { rd, rs1, csr } => {
-                let val = self.csr.execute_rs(csr, self.read_register(rs1))?;
-                self.write_register(rd, val);
+                let old_value = self.csr.read(csr)?;
+                if rs1 != 0 {
+                    self.csr.write(csr, old_value | self.read_register(rs1));
+                }
+                self.write_register(rd, old_value);
             }
             Instruction::CSRRC { rd, rs1, csr } => {
-                let val = self.csr.execute_rc(csr, self.read_register(rs1))?;
-                self.write_register(rd, val);
+                let old_value = self.csr.read(csr)?;
+                if rs1 != 0 {
+                    self.csr.write(csr, old_value & !self.read_register(rs1));
+                }
+                self.write_register(rd, old_value);
             }
             Instruction::CSRRWI { rd, imm, csr } => {
-                let val = self.csr.execute_rwi(csr, imm)?;
-                self.write_register(rd, val);
+                let old_value = if rd != 0 { self.csr.read(csr)? } else { 0 };
+                self.csr.write(csr, imm as u64);
+                self.write_register(rd, old_value);
             }
             Instruction::CSRRSI { rd, imm, csr } => {
-                let val = self.csr.execute_rsi(csr, imm)?;
-                self.write_register(rd, val);
+                let old_value = self.csr.read(csr)?;
+                if imm != 0 {
+                    self.csr.write(csr, old_value | (imm as u64));
+                }
+                self.write_register(rd, old_value);
             }
             Instruction::CSRRCI { rd, imm, csr } => {
-                let val = self.csr.execute_rci(csr, imm)?;
-                self.write_register(rd, val);
+                let old_value = self.csr.read(csr)?;
+                if imm != 0 {
+                    self.csr.write(csr, old_value & !(imm as u64));
+                }
+                self.write_register(rd, old_value);
             }
 
         }
