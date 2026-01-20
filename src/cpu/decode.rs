@@ -182,10 +182,23 @@ pub fn decode(instruction: RawInstruction) -> Result<Instruction, Exception> {
 
         // NOTE: RV32I System
         0b11100_11 => {
-            let funct3 = (instruction >> 12) & 0x7;
-            let imm12 = (instruction >> 20) & 0xfff;
-            match (funct3, imm12) {
-                (0b000, 0b000000000001) => Ok(Instruction::EBREAK),
+            let funct3 = (instruction >> 12) & 0b111;
+            let csr = ((instruction >> 20) & 0b1111_1111_1111) as u16;
+
+            match funct3 {
+                0b000 => match csr {
+                    0b00000_00_00000 => Ok(Instruction::ECALL),
+                    0b00000_00_00001 => Ok(Instruction::EBREAK),
+
+                    _ => Err(Exception::UnknownInstruction(instruction)),
+                },
+
+                0b001 => Ok(Instruction::CSRRW { rd, rs1, csr }),
+                0b010 => Ok(Instruction::CSRRS { rd, rs1, csr }),
+                0b011 => Ok(Instruction::CSRRC { rd, rs1, csr }),
+                0b101 => Ok(Instruction::CSRRWI { rd, imm: rs1 as u8, csr }),
+                0b110 => Ok(Instruction::CSRRSI { rd, imm: rs1 as u8, csr }),
+                0b111 => Ok(Instruction::CSRRCI { rd, imm: rs1 as u8, csr }),
 
                 _ => Err(Exception::UnknownInstruction(instruction)),
             }

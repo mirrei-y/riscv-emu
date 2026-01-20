@@ -85,8 +85,15 @@ pub enum Instruction {
     JAL { rd: RegIdx, offset: Imm },
     JALR { rd: RegIdx, rs1: RegIdx, offset: Imm },
 
-    // NOTE: RV32I System
+    // NOTE: RV32I System / Zicsr
+    ECALL,
     EBREAK,
+    CSRRW { rd: RegIdx, rs1: RegIdx, csr: u16 },
+    CSRRS { rd: RegIdx, rs1: RegIdx, csr: u16 },
+    CSRRC { rd: RegIdx, rs1: RegIdx, csr: u16 },
+    CSRRWI { rd: RegIdx, imm: u8, csr: u16 },
+    CSRRSI { rd: RegIdx, imm: u8, csr: u16 },
+    CSRRCI { rd: RegIdx, imm: u8, csr: u16 },
 }
 
 pub struct InstructionContext {

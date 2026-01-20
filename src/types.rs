@@ -21,4 +21,6 @@ pub enum Exception {
     UnknownInstruction(RawInstruction),
     /// 不正なメモリアクセス
     InvalidMemoryAccess(Address),
+    /// 不正な CSR レジスタアクセス
+    InvalidCsrAccess(u16),
 }

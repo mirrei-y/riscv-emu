@@ -1,6 +1,7 @@
+mod csr;
 mod decode;
 
-use crate::{Exception, Imm, Instruction, InstructionContext, RawInstruction, RawShortInstruction, RegIdx, XLEN, bus::Bus};
+use crate::{Exception, Imm, Instruction, InstructionContext, RawInstruction, RawShortInstruction, RegIdx, XLEN, bus::Bus, cpu::csr::Csr};
 
 /// CPU
 pub struct Cpu {
@@ -10,6 +11,8 @@ pub struct Cpu {
     pc: u64,
     /// バス
     bus: Bus,
+    /// CSR レジスタ
+    csr: Csr,
 }
 impl Cpu {
     pub fn new(bus: Bus) -> Self {
@@ -17,6 +20,7 @@ impl Cpu {
             registers: [0; 32],
             pc: 0x8000_0000,
             bus,
+            csr: Csr::new(),
         }
     }
 
@@ -300,7 +304,33 @@ impl Cpu {
             },
 
             // NOTE: RV32I System
+            Instruction::ECALL => {},
             Instruction::EBREAK => {},
+            Instruction::CSRRW { rd, rs1, csr } => {
+                let val = self.csr.execute_rw(csr, self.read_register(rs1))?;
+                self.write_register(rd, val);
+            }
+            Instruction::CSRRS { rd, rs1, csr } => {
+                let val = self.csr.execute_rs(csr, self.read_register(rs1))?;
+                self.write_register(rd, val);
+            }
+            Instruction::CSRRC { rd, rs1, csr } => {
+                let val = self.csr.execute_rc(csr, self.read_register(rs1))?;
+                self.write_register(rd, val);
+            }
+            Instruction::CSRRWI { rd, imm, csr } => {
+                let val = self.csr.execute_rwi(csr, imm)?;
+                self.write_register(rd, val);
+            }
+            Instruction::CSRRSI { rd, imm, csr } => {
+                let val = self.csr.execute_rsi(csr, imm)?;
+                self.write_register(rd, val);
+            }
+            Instruction::CSRRCI { rd, imm, csr } => {
+                let val = self.csr.execute_rci(csr, imm)?;
+                self.write_register(rd, val);
+            }
+
         }
 
         if current_pc == self.pc {
