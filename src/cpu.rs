@@ -42,22 +42,23 @@ impl Cpu {
     }
 
     /// 命令をフェッチします。
-    pub fn fetch(&mut self) -> Result<u64, Exception> {
-        let instruction = self.bus.read(self.pc, 4)?;
+    pub fn fetch(&mut self) -> Result<RawInstruction, Exception> {
+        let instruction = self.bus.read(self.pc, 4)? as RawInstruction;
         Ok(instruction)
     }
 
     pub fn decode(&self, instruction: RawInstruction) -> Result<InstructionContext, Exception> {
-        Ok(InstructionContext {
-            instruction: decode::decode(instruction)?,
-            next_pc: self.pc + 4,
-        })
-    }
-    pub fn decode_compressed(&self, instruction: RawShortInstruction) -> Result<InstructionContext, Exception> {
-        Ok(InstructionContext {
-            instruction: decode::decode_compressed(instruction)?,
-            next_pc: self.pc + 2,
-        })
+        if instruction & 0b11 != 0b11 {
+            Ok(InstructionContext {
+                instruction: decode::decode_compressed(instruction as RawShortInstruction)?,
+                next_pc: self.pc + 2,
+            })
+        } else {
+            Ok(InstructionContext {
+                instruction: decode::decode(instruction)?,
+                next_pc: self.pc + 4,
+            })
+        }
     }
 
     /// R-Type (Register-Register) 演算用ヘルパー: rs1 と rs2 を読み出し、op を適用して rd に書き込みます。
@@ -353,5 +354,24 @@ impl Cpu {
         }
 
         Ok(())
+    }
+
+    pub fn cycle(&mut self) {
+        // TODO: unwrap
+        let instruction = self.fetch().unwrap();
+        let ctx = self.decode(instruction).unwrap();
+
+        println!("Execute: {:?}", ctx);
+
+        if let Instruction::EBREAK = ctx.instruction {
+            panic!("EBREAK encountered. Halting execution."); // TODO: 暫定的処置
+        }
+
+        match self.execute(ctx) {
+            Ok(_) => {},
+            Err(e) => {
+                panic!("{:?}", e);
+            },
+        };
     }
 }

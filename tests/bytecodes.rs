@@ -39,21 +39,7 @@ fn run_vm(path: &Path) -> Result<(), Exception> {
         }
         inst_count += 1;
 
-        let instruction = cpu.fetch()?;
-        let ctx = if instruction & 0b11 != 0b11 {
-            cpu.decode_compressed(instruction as RawShortInstruction)
-        } else {
-            cpu.decode(instruction as RawInstruction)
-        }?;
-
-        println!("Execute: {:?}", ctx);
-
-        if let Instruction::EBREAK = ctx.instruction {
-            println!("EBREAK encountered. Halting execution.");
-            break;
-        }
-
-        cpu.execute(ctx)?;
+        cpu.cycle();
     }
 
     Ok(())
