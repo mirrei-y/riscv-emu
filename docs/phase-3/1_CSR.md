@@ -150,3 +150,48 @@ Instruction::CSRRCI { rd, imm, csr } => {
     self.write_register(rd, old_value);
 }
 ```
+
+### mhartid, misa
+
+CSR レジスタの中で特別扱いしなければならないものがあるらしく、それが `mhartid` と `misa`。
+
+`mhartid` は Machine Hardware Thread ID の略、CPU の ID を表す CSR レジスタで、シングルコアなので 0 固定で良いらしい。
+書き込み命令は無視。
+
+`misa` は Machine ISA の略、CPU がサポートしている命令セットを表現する CSR レジスタらしい。
+これも書き込み命令は無視。
+
+`misa` に実際に設定する値については、[riscv-isa-manual](https://github.com/riscv/riscv-isa-manual/blob/main/src/machine.adoc#machine-isa-misa-register) が参考になった。
+
+あと、MXL のビットはどこに置く？という疑問も発生した。
+これは「[M-modeの実装 (1. CSRの実装)](https://cpu.kanataso.net/20-mmode-csr.html#%E6%A6%82%E8%A6%81)」の図が大変役に立った。
+……というかこれに沿って進めばよかったのでは。
+
+これを踏まえて、`Csr::read` メソッドを以下のように修正する。
+
+```rust
+/// CSR レジスタの値を読み取ります。
+pub fn read(&self, addr: u16) -> Result<u64, Exception> {
+    if addr as usize >= self.data.len() {
+        Err(Exception::InvalidCsrAccess(addr))
+    } else if addr == CSR_MHARTID {
+        Ok(0) // TODO: シングルコア
+    } else if addr == CSR_MISA {
+        const MISA_64BIT: u64 = 2 << 62; // 32bit=1, 64bit=2
+        const MISA_EXT_I: u64 = 1 << (b'I' - b'A');
+        const MISA_EXT_M: u64 = 1 << (b'M' - b'A');
+        const MISA_EXT_C: u64 = 1 << (b'C' - b'A');
+        Ok(MISA_64BIT | MISA_EXT_I | MISA_EXT_M | MISA_EXT_C)
+    } else {
+        Ok(self.data[addr as usize])
+    }
+}
+```
+
+`marchid`, `mvendorid`, `mimpid` など設定できるみたい。個人的にすごいやってみたいが、本質的ではないので後にする。
+
+### mstatus
+
+`mstatus` レジスタは、特権関連の状態を管理したり、その他いろいろ管理している CSR レジスタらしいが、これに対し未定義のビットは常に 0、そして未定義のビットの書き込みもしてはいけないらしい。
+
+そしてここにフィールドが大量にあり、把握するのがかなり面倒。
